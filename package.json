@@ -1,0 +1,24 @@
+{
+  "name": "api-produtos",
+  "version": "1.0.0",
+  "description": "Exercicio do curso de node; Uma API de produtos com crud em memória",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/renansantanax/api-produtos.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/renansantanax/api-produtos/issues"
+  },
+  "homepage": "https://github.com/renansantanax/api-produtos#readme",
+  "dependencies": {
+    "express": "^5.2.1"
+  }
+}
