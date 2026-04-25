@@ -19,7 +19,9 @@
   },
   "homepage": "https://github.com/renansantanax/api-produtos#readme",
   "dependencies": {
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "mysql2": "^3.22.2",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
   }

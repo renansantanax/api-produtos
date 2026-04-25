@@ -1,0 +1,24 @@
+services:
+  mysql: # Nome do serviço
+    image: mysql:8.0 # Imagem do MySQL
+    container_name: mysql_produtos_local # Nome do container
+    restart: always # Sempre manter o serviço em execução
+    environment: # Variáveis de ambiente do MySQL
+      MYSQL_ROOT_PASSWORD: senha_root
+      MYSQL_DATABASE: db_produtos
+      MYSQL_USER: admin
+      MYSQL_PASSWORD: senha
+    ports:
+      - "3306:3306" # Porta padrão do MySQL
+    volumes:
+      - mysql_data:/var/lib/mysql # Diretório de dados
+
+  adminer:
+    image: adminer
+    container_name: adminer_mysql
+    restart: always
+    ports:
+      - "8080:8080"
+
+volumes: # Volume para persistência
+  mysql_data:

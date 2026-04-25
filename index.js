@@ -1,8 +1,38 @@
 const express = require("express");
 const swaggerUi = require("swagger-ui-express");
 const swaggerJsdoc = require("swagger-jsdoc");
+const mysql = require("mysql2/promise");
+require("dotenv").config();
 
 const app = express();
+
+const connection = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  port: process.env.DB_PORT,
+  password: process.env.DB_PASS,
+  database: process.env.DB_NAME,
+});
+
+async function inicializarBanco() {
+  await connection.query(`
+  CREATE TABLE IF NOT EXISTS produtos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nome VARCHAR(100) NOT NULL,
+    preco DECIMAL(10,2) NOT NULL,
+    quantidade INT DEFAULT 0,
+    sku VARCHAR(50) NOT NULL UNIQUE
+  );
+`);
+
+  await connection.query(`
+    INSERT INTO produtos(nome, preco, quantidade, sku)
+    VALUES ('Notebook', 2000.0, 10, 'NOTE-01'), ('Mouse', 150.0, 25, 'MOUSE-01')
+    ON DUPLICATE KEY UPDATE
+      preco = VALUES(preco),
+      quantidade = VALUES(quantidade);
+    `);
+}
 
 const options = {
   definition: {
@@ -27,11 +57,6 @@ app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use(express.json());
 
-let produtos = [
-  { id: 1, nome: "Notebook", preco: 2000, quantidade: 10 },
-  { id: 2, nome: "Controle Xbox", preco: 350, quantidade: 15 },
-];
-
 /**
  * @swagger
  * /api/produtos:
@@ -49,18 +74,26 @@ let produtos = [
  *       200:
  *         description: Lista de produtos (com ou sem filtro)
  */
-app.get("/api/produtos", (req, res) => {
-  const { nome } = req.query;
+app.get("/api/produtos", async (req, res) => {
+  try {
+    const { nome } = req.query;
 
-  if (!nome || nome.trim() === "") {
-    return res.json(produtos);
+    if (!nome || nome == "") {
+      const [rows] = await connection.query(
+        "SELECT * FROM produtos ORDER BY id",
+      );
+      return res.json(rows);
+    }
+
+    const [rows] = await connection.query(
+      "SELECT * FROM produtos WHERE nome like ?",
+      [`%${nome}%`],
+    );
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ erro: "Erro ao buscar produtos" });
   }
-
-  const produto = produtos.filter((p) => {
-    return p.nome.toLowerCase().includes(nome.toLowerCase());
-  });
-
-  res.json(produto);
 });
 
 /**
@@ -73,9 +106,11 @@ app.get("/api/produtos", (req, res) => {
  *       200:
  *         description: Lista de produtos disponíveis em estoque
  */
-app.get("/api/produtos/estoque", (req, res) => {
-  const produtosComEstoque = produtos.filter((p) => p.quantidade > 0);
-  res.json(produtosComEstoque);
+app.get("/api/produtos/estoque", async (req, res) => {
+  const [rows] = await connection.query(
+    "SELECT * FROM produtos WHERE quantidade > 0",
+  );
+  res.json(rows);
 });
 
 /**
@@ -97,7 +132,7 @@ app.get("/api/produtos/estoque", (req, res) => {
  *       400:
  *         description: Parâmetro de preço inválido
  */
-app.get("/api/produtos/preco", (req, res) => {
+app.get("/api/produtos/preco", async (req, res) => {
   const { min } = req.query;
 
   if (!min) {
@@ -113,11 +148,12 @@ app.get("/api/produtos/preco", (req, res) => {
     });
   }
 
-  const produtosComPrecoMaiorQueMin = produtos.filter(
-    (p) => p.preco > minNumero,
+  const [rows] = await connection.query(
+    "SELECT * FROM produtos WHERE preco > ?",
+    [min],
   );
 
-  res.json(produtosComPrecoMaiorQueMin);
+  res.json(rows);
 });
 
 /**
@@ -138,18 +174,32 @@ app.get("/api/produtos/preco", (req, res) => {
  *       404:
  *         description: Produto não encontrado
  */
-app.get("/api/produtos/:id", (req, res) => {
+app.get("/api/produtos/:id", async (req, res) => {
   const id = parseInt(req.params.id);
 
-  const produto = produtos.find((p) => p.id === id);
+  if (!id) {
+    return res.status(400).json({ message: "Id não pode ficar vazio." });
+  }
 
-  if (!produto) {
-    return res.status(404).json({
-      mensagem: "Produto não encontrado. Verifique o ID informado.",
+  const idNumber = Number(id);
+
+  if (isNaN(idNumber)) {
+    return res.status(400).json({
+      mensagem: "O valor do id deve ser um número válido.",
     });
   }
 
-  res.json(produto);
+  const [rows] = await connection.query("SELECT * FROM produtos WHERE id = ?", [
+    idNumber,
+  ]);
+
+  if (!rows[0]) {
+    return res
+      .status(404)
+      .json({ mensagem: "Nenhum produto com o id informado foi encontrado." });
+  }
+
+  res.json(rows);
 });
 
 /**
@@ -170,18 +220,23 @@ app.get("/api/produtos/:id", (req, res) => {
  *                 type: number
  *               quantidade:
  *                 type: integer
+ *               sku:
+ *                 type: string
  *     responses:
  *       201:
  *         description: Produto criado
  */
-app.post("/api/produtos/", (req, res) => {
-  const { nome } = req.body;
-  const { preco } = req.body;
-  const { quantidade } = req.body;
+app.post("/api/produtos/", async (req, res) => {
+  const { nome, preco, quantidade, sku } = req.body;
 
   if (!nome || nome.trim() === "")
     return res.status(400).json({
       mensagem: "O nome do produto não pode ser vazio!",
+    });
+
+  if (!sku || sku.trim() === "")
+    return res.status(400).json({
+      mensagem: "O sku do produto não pode ser vazio!",
     });
 
   if (preco == null || preco <= 0)
@@ -194,25 +249,27 @@ app.post("/api/produtos/", (req, res) => {
       .status(400)
       .json({ mensagem: "A quantidade não pode ser negativa." });
 
-  const nomeExiste = produtos.some(
-    (p) => p.nome.toLowerCase() === nome.toLowerCase(),
+  const [skuExiste] = await connection.query(
+    "SELECT sku FROM produtos WHERE sku= ?",
+    [sku],
   );
-  if (nomeExiste) {
-    return res
-      .status(400)
-      .json({ mensagem: "Já existe produto com esse nome." });
+
+  if (skuExiste.length > 0) {
+    return res.status(409).json({
+      mensagem: "Já existe produto com esse sku.",
+    });
   }
 
-  const novoProduto = {
-    id: produtos[produtos.length - 1].id + 1,
-    nome,
-    preco,
-    quantidade,
-  };
+  const [result] = await connection.query(
+    "INSERT INTO produtos(nome, preco, quantidade, sku) VALUES(?, ?, ?, ?)",
+    [nome, preco, quantidade, sku],
+  );
 
-  produtos.push(novoProduto);
+  const [rows] = await connection.query("SELECT * FROM produtos WHERE id = ?", [
+    result.insertId,
+  ]);
 
-  res.status(201).json(novoProduto);
+  res.status(201).json(rows[0]);
 });
 
 /**
@@ -305,7 +362,14 @@ app.delete("/api/produtos/:id", (req, res) => {
   });
 });
 
-app.listen(3000, () => {
-  console.log("Servidor rodando em http://localhost:3000");
-  console.log("Swagger rodando em http://localhost:3000/docs");
-});
+inicializarBanco()
+  .then(() => {
+    app.listen(3000, () => {
+      console.log("Servidor rodando em http://localhost:3000");
+      console.log("Swagger rodando em http://localhost:3000/docs");
+      console.log("MySQL conectado na porta 3306");
+    });
+  })
+  .catch((error) => {
+    console.log("Erro ao inicializar o banco de dados: ", error.message);
+  });
