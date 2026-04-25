@@ -296,32 +296,77 @@ app.post("/api/produtos/", async (req, res) => {
  *                 type: number
  *               quantidade:
  *                 type: integer
+ *               sku:
+ *                 type: string
  *     responses:
  *       200:
  *         description: Produto atualizado
  *       404:
  *         description: Produto não encontrado
  */
-app.put("/api/produtos/:id", (req, res) => {
+app.put("/api/produtos/:id", async (req, res) => {
   const id = parseInt(req.params.id);
 
-  const { nome } = req.body;
-  const { preco } = req.body;
-  const { quantidade } = req.body;
+  const [produtoExiste] = await connection.query(
+    "SELECT * FROM produtos WHERE id = ?",
+    [id],
+  );
 
-  const produto = produtos.find((p) => p.id === id);
-
-  if (!produto) {
+  if (produtoExiste.length === 0) {
     return res.status(404).json({
       mensagem: "Produto não encontrado para edição.",
     });
   }
 
-  produto.nome = nome;
-  produto.preco = preco;
-  produto.quantidade = quantidade;
+  const { nome, preco, quantidade, sku } = req.body;
 
-  res.json(produto);
+  if (!nome)
+    return res.status(400).json({
+      mensagem: "O nome do produto não pode ser vazio!",
+    });
+
+  if (!sku)
+    return res.status(400).json({
+      mensagem: "O sku do produto não pode ser vazio!",
+    });
+
+  if (preco == null || preco <= 0)
+    return res
+      .status(400)
+      .json({ mensagem: "O preço não pode ser menor ou igual a zero." });
+
+  if (quantidade == null || quantidade < 0)
+    return res
+      .status(400)
+      .json({ mensagem: "A quantidade não pode ser negativa." });
+
+  const [skuExiste] = await connection.query(
+    "SELECT 1 FROM produtos WHERE sku = ? AND id <> ?",
+    [sku, id],
+  );
+
+  if (skuExiste.length > 0) {
+    return res.status(409).json({
+      mensagem: "Já existe produto com esse sku.",
+    });
+  }
+
+  const [result] = await connection.query(
+    "UPDATE produtos SET nome = ?, preco = ?, quantidade = ?, sku = ? WHERE id = ?",
+    [nome, preco, quantidade, sku, id],
+  );
+
+  if (result.affectedRows === 0) {
+    return res
+      .status(404)
+      .json({ mensagem: "Produto não encontrado para edição" });
+  }
+
+  const [rows] = await connection.query("SELECT * FROM produtos WHERE id = ?", [
+    id,
+  ]);
+
+  res.status(200).json(rows[0]);
 });
 
 /**
@@ -341,25 +386,20 @@ app.put("/api/produtos/:id", (req, res) => {
  *       404:
  *         description: Produto não encontrado
  */
-app.delete("/api/produtos/:id", (req, res) => {
+app.delete("/api/produtos/:id", async (req, res) => {
   const id = parseInt(req.params.id);
 
-  const existe = produtos.some((p) => p.id === id);
+  const [result] = await connection.query("DELETE FROM produtos WHERE id = ?", [
+    id,
+  ]);
 
-  if (!existe) {
-    return res.status(404).json({
-      mensagem: "Produto não encontrado para exclusão.",
-    });
+  if (result.affectedRows === 0) {
+    return res
+      .status(404)
+      .json({ mensagem: "Não foi encontrado produto para exclusão." });
   }
 
-  const produtoInfo = produtos.find((p) => p.id === id);
-  produtos = produtos.filter((p) => p.id !== id);
-  res.json({
-    mensagem: "Produto excluído com sucesso.",
-    produto: produtoInfo.nome,
-    preco: produtoInfo.preco,
-    quantidade: produtoInfo.quantidade,
-  });
+  res.status(204).json({ mensagem: "Produto excluído com sucesso!" });
 });
 
 inicializarBanco()
